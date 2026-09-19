@@ -7,37 +7,11 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.net.Socket;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-/**
- * WishListModule
- * ----------------
- * Member 5's whole area in a single class: "Create, Update, Delete my Wish
- * List" and "View my Friends Wish List" (spec points 4 and 6), plus the
- * small pieces of shared plumbing (Item, Request/Response, NetworkClient)
- * needed to talk to the server, all as nested classes so the whole feature
- * lives in one file.
- *
- * Expected server-side commands (to agree with member 2 - Connections,
- * and member 3 - Business Logic):
- *  - "GET_CATALOG"          -> data: List<Item>
- *  - "GET_MY_WISHLIST"      -> data: List<WishListEntry>
- *  - "ADD_WISHLIST_ITEM"    params: itemId, note   -> data: WishListEntry
- *  - "UPDATE_WISHLIST_ITEM" params: entryId, note  -> data: WishListEntry
- *  - "DELETE_WISHLIST_ITEM" params: entryId        -> data: null
- *  - "GET_FRIEND_WISHLIST"  params: friendUsername -> data: List<WishListEntry>
- */
 public class WishListModule {
-
-    // ---------------------------------------------------------------
-    // Demo entry point: opens a window with "My Wish List" and
-    // "Friend's Wish List" tabs. Replace host/port with the real
-    // server address once member 2's server is up.
-    // ---------------------------------------------------------------
     public static void main(String[] args) throws IOException {
-        NetworkClient client = NetworkClient.connect("localhost", 5000);
+        NetworkClient client = NetworkClient.connect("localhost", ServerMain.DEFAULT_PORT);
         WishListService service = new WishListService(client);
 
         JFrame frame = new JFrame("i-Wish - My Wish List");
@@ -46,7 +20,6 @@ public class WishListModule {
 
         FriendWishListPanel friendPanel = new FriendWishListPanel(service);
         tabs.addTab("Friend's Wish List", friendPanel);
-        // Example: friendPanel.showWishListOf("some_friend_username");
 
         frame.add(tabs);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -55,9 +28,6 @@ public class WishListModule {
         frame.setVisible(true);
     }
 
-    // =================================================================
-    // Model: a catalog item (added by admin / DB insertion - spec 12)
-    // =================================================================
     public static class Item implements Serializable {
         private int id;
         private String name;
@@ -93,9 +63,6 @@ public class WishListModule {
         }
     }
 
-    // =================================================================
-    // Model: one entry inside a wish list, with contribution progress
-    // =================================================================
     public static class WishListEntry implements Serializable {
         private int entryId;
         private Item item;
@@ -135,43 +102,6 @@ public class WishListModule {
         public boolean isFullyFunded() { return fullyFunded; }
     }
 
-    // =================================================================
-    // Shared plumbing: Request / Response / NetworkClient
-    // =================================================================
-    public static class Request implements Serializable {
-        private final String command;
-        private final Map<String, Object> params = new HashMap<>();
-
-        public Request(String command) { this.command = command; }
-
-        public Request set(String key, Object value) {
-            params.put(key, value);
-            return this;
-        }
-
-        public String getCommand() { return command; }
-        public Object get(String key) { return params.get(key); }
-    }
-
-    public static class Response implements Serializable {
-        private final boolean success;
-        private final String message;
-        private final Object data;
-
-        public Response(boolean success, String message, Object data) {
-            this.success = success;
-            this.message = message;
-            this.data = data;
-        }
-
-        public static Response ok(Object data) { return new Response(true, "OK", data); }
-        public static Response error(String message) { return new Response(false, message, null); }
-
-        public boolean isSuccess() { return success; }
-        public String getMessage() { return message; }
-        public Object getData() { return data; }
-    }
-
     public static class NetworkClient {
         private static NetworkClient instance;
 
@@ -200,18 +130,22 @@ public class WishListModule {
             return instance;
         }
 
-        public synchronized Response send(Request request) {
+        public synchronized ServerMain.Response send(ServerMain.Request request) {
             try {
                 out.writeObject(request);
                 out.flush();
                 out.reset();
-                Object response = in.readObject();
-                if (response instanceof Response) {
-                    return (Response) response;
+                while (true) {
+                    Object obj = in.readObject();
+                    if (!(obj instanceof ServerMain.Response)) {
+                        return ServerMain.Response.error(request.getId(), "Malformed response from server.");
+                    }
+                    ServerMain.Response response = (ServerMain.Response) obj;
+                    if (response.isPush()) continue;
+                    return response;
                 }
-                return Response.error("Malformed response from server.");
             } catch (IOException | ClassNotFoundException e) {
-                return Response.error("Connection problem: " + e.getMessage());
+                return ServerMain.Response.error(request.getId(), "Connection problem: " + e.getMessage());
             }
         }
 
@@ -223,9 +157,6 @@ public class WishListModule {
         }
     }
 
-    // =================================================================
-    // Business logic: Create/Update/Delete my wish list, view a friend's
-    // =================================================================
     public static class WishListService {
         private final NetworkClient client;
 
@@ -233,46 +164,48 @@ public class WishListModule {
             this.client = client;
         }
 
-        @SuppressWarnings("unchecked")
-        public List<Item> getCatalog() throws WishListException {
-            Response response = client.send(new Request("GET_CATALOG"));
+        private ServerMain.Response call(ServerMain.Request request) throws WishListException {
+            ServerMain.Response response = client.send(request);
             if (!response.isSuccess()) throw new WishListException(response.getMessage());
-            return (List<Item>) response.getData();
+            return response;
         }
 
-        @SuppressWarnings("unchecked")
+        public List<Item> getCatalog() throws WishListException {
+            ServerMain.Response response = call(new ServerMain.Request(ServerMain.RequestType.GET_ALL_ITEMS));
+            List<Item> items = response.get("data");
+            return items != null ? items : new ArrayList<>();
+        }
+
         public List<WishListEntry> getMyWishList() throws WishListException {
-            Response response = client.send(new Request("GET_MY_WISHLIST"));
-            if (!response.isSuccess()) throw new WishListException(response.getMessage());
-            return (List<WishListEntry>) response.getData();
+            ServerMain.Response response = call(new ServerMain.Request(ServerMain.RequestType.GET_MY_WISHLIST));
+            List<WishListEntry> entries = response.get("data");
+            return entries != null ? entries : new ArrayList<>();
         }
 
         public WishListEntry addItem(Item item, String note) throws WishListException {
-            Request request = new Request("ADD_WISHLIST_ITEM").set("itemId", item.getId()).set("note", note);
-            Response response = client.send(request);
-            if (!response.isSuccess()) throw new WishListException(response.getMessage());
-            return (WishListEntry) response.getData();
+            ServerMain.Request request = new ServerMain.Request(ServerMain.RequestType.ADD_WISH_ITEM)
+                    .put("itemId", item.getId())
+                    .put("note", note);
+            return call(request).get("data");
         }
 
         public WishListEntry updateEntry(int entryId, String newNote) throws WishListException {
-            Request request = new Request("UPDATE_WISHLIST_ITEM").set("entryId", entryId).set("note", newNote);
-            Response response = client.send(request);
-            if (!response.isSuccess()) throw new WishListException(response.getMessage());
-            return (WishListEntry) response.getData();
+            ServerMain.Request request = new ServerMain.Request(ServerMain.RequestType.UPDATE_WISH_ITEM)
+                    .put("entryId", entryId)
+                    .put("note", newNote);
+            return call(request).get("data");
         }
 
         public void deleteEntry(int entryId) throws WishListException {
-            Request request = new Request("DELETE_WISHLIST_ITEM").set("entryId", entryId);
-            Response response = client.send(request);
-            if (!response.isSuccess()) throw new WishListException(response.getMessage());
+            ServerMain.Request request = new ServerMain.Request(ServerMain.RequestType.DELETE_WISH_ITEM)
+                    .put("entryId", entryId);
+            call(request);
         }
 
-        @SuppressWarnings("unchecked")
         public List<WishListEntry> getFriendWishList(String friendUsername) throws WishListException {
-            Request request = new Request("GET_FRIEND_WISHLIST").set("friendUsername", friendUsername);
-            Response response = client.send(request);
-            if (!response.isSuccess()) throw new WishListException(response.getMessage());
-            List<WishListEntry> data = (List<WishListEntry>) response.getData();
+            ServerMain.Request request = new ServerMain.Request(ServerMain.RequestType.GET_FRIEND_WISHLIST)
+                    .put("friendUsername", friendUsername);
+            List<WishListEntry> data = call(request).get("data");
             return data != null ? data : new ArrayList<>();
         }
 
@@ -281,9 +214,6 @@ public class WishListModule {
         }
     }
 
-    // =================================================================
-    // GUI: dialog to add/edit a wish list entry
-    // =================================================================
     public static class AddEditWishItemDialog extends JDialog {
         private JComboBox<Item> catalogCombo;
         private JTextArea noteArea;
@@ -362,9 +292,6 @@ public class WishListModule {
         public String getNote() { return note; }
     }
 
-    // =================================================================
-    // GUI: my own wish list panel (Create, Update, Delete)
-    // =================================================================
     public static class MyWishListPanel extends JPanel {
         private final WishListService wishListService;
         private final DefaultTableModel tableModel;
@@ -491,9 +418,6 @@ public class WishListModule {
         }
     }
 
-    // =================================================================
-    // GUI: read-only view of a friend's wish list
-    // =================================================================
     public static class FriendWishListPanel extends JPanel {
         private final WishListService wishListService;
         private final DefaultTableModel tableModel;
