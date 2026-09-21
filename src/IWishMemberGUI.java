@@ -79,8 +79,8 @@ public class IWishMemberGUI {
             menuPanel.setOpaque(false);
             menuPanel.setBorder(new EmptyBorder(20, 20, 0, 20));
 
-            JButton btnContribute = createMenuButton("ð  Contribute");
-            JButton btnNotifications = createMenuButton("ð  Notifications");
+            JButton btnContribute = createMenuButton("Contribute");
+            JButton btnNotifications = createMenuButton("Notifications");
 
             btnContribute.addActionListener(e -> parent.showScreen("Contribution"));
             btnNotifications.addActionListener(e -> parent.showScreen("Notifications"));
@@ -166,7 +166,7 @@ public class IWishMemberGUI {
 
             itemCard.add(itemDetails, BorderLayout.CENTER);
 
-            JLabel imgPlaceholder = new JLabel("ð§", SwingConstants.CENTER);
+            JLabel imgPlaceholder = new JLabel("\uD83C\uDFA7", SwingConstants.CENTER);
             imgPlaceholder.setFont(new Font("Arial", Font.PLAIN, 80));
             imgPlaceholder.setPreferredSize(new Dimension(150, 150));
             itemCard.add(imgPlaceholder, BorderLayout.EAST);
@@ -235,7 +235,7 @@ public class IWishMemberGUI {
         }
 
         private JPanel createNotificationCard(String type, String message, String time, Color bgColor) {
-            String icon = "ð"; // Ø£ÙÙÙÙØ© Ø§ÙØªØ±Ø§Ø¶ÙØ©
+            String icon = "\uD83D\uDD14";
             if (type.equals("Receiver"));
             else if (type.equals("Buyer")) ;
             else if (type.equals("System")) ;
